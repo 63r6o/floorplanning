@@ -1,15 +1,31 @@
-use std::{fmt, collections::VecDeque};
+use std::{borrow::Borrow, cell::RefCell, collections::VecDeque, fmt};
 
-use rand::{
-    seq::SliceRandom,
-    Rng,
-};
+use rand::{seq::SliceRandom, Rng};
 
+#[derive(PartialEq, Debug, Clone, Copy)]
 struct Rectangle {
     name: i32,
     area: f32,
-    width: f32,
-    height: f32,
+    // it might grow
+    dimensions: [(f32, f32); 100],
+}
+
+impl Rectangle {
+    pub fn new(module: &Module) -> Self {
+        let mut dimensions = [(-1.0f32, -1.0f32); 100];
+        if module.rotatable {
+            dimensions[0] = (module.width, module.height);
+            dimensions[1] = (module.height, module.width)
+        } else {
+            dimensions[0] = (module.width, module.height);
+            dimensions[1] = (module.width, module.height)
+        }
+        Rectangle {
+            name: module.name,
+            area: module.width * module.height,
+            dimensions,
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -36,8 +52,8 @@ impl Module {
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum Element {
     Operand(Module),
-    Operator(char),     // + -> horizontal (a+b = a under b)
-                        // * -> vertical (a*b) = a on the left of b
+    Operator(char), // + -> horizontal (a+b = a under b)
+                    // * -> vertical (a*b) = a on the left of b
 }
 
 impl fmt::Display for Element {
@@ -101,7 +117,7 @@ impl PolishExpression {
         loop {
             // get a random operand-operator index from the list, and remove it (so we can't choose it twice)
             if operand_operators.is_empty() {
-                break
+                break;
             }
             let random = rand::thread_rng().gen_range(0..operand_operators.len());
             let i = operand_operators.remove(random);
@@ -192,6 +208,7 @@ impl PolishExpression {
 #[derive(PartialEq, Debug)]
 struct SlicingTree {
     value: Element,
+    dimensions: RefCell<Vec<(f32, f32)>>,
     left: Option<Box<SlicingTree>>,
     right: Option<Box<SlicingTree>>,
 }
@@ -200,6 +217,7 @@ impl SlicingTree {
     pub fn new(value: Element, left: SlicingTree, right: SlicingTree) -> Self {
         SlicingTree {
             value,
+            dimensions: RefCell::new(Vec::new()),
             left: Some(Box::new(left)),
             right: Some(Box::new(right)),
         }
@@ -207,8 +225,54 @@ impl SlicingTree {
     pub fn new_leaf(value: Element) -> Self {
         SlicingTree {
             value,
+            dimensions: {
+                let mut dimensions = Vec::new();
+                if let Element::Operand(c) = value {
+                    if c.rotatable && c.width != c.height {
+                        dimensions.push((c.width, c.height));
+                        dimensions.push((c.height, c.width));
+                    } else {
+                        dimensions.push((c.width, c.height));
+                    }
+                }
+                RefCell::new(dimensions)
+            },
             left: None,
             right: None,
+        }
+    }
+
+    // test
+    pub fn new_internal_node(value: Element, left: SlicingTree, right: SlicingTree) -> Self {
+        SlicingTree {
+            value,
+            dimensions: {
+                let left_dimensions = left.dimensions.borrow();
+                let right_dimensions = right.dimensions.borrow();
+                let mut dimensions = Vec::new();
+                for i in 0..left_dimensions.len() {
+                    for j in 0..right_dimensions.len() {
+                        if value.to_string() == "*".to_string() {
+                            let new_dimension = (
+                                left_dimensions[i].0 + right_dimensions[j].0,
+                                left_dimensions[i].1.max(right_dimensions[j].1),
+                            );
+                            // TODO pruning acording to the book
+                            dimensions.push(new_dimension);
+                        } else {
+                            let new_dimension = (
+                                left_dimensions[i].0.max(right_dimensions[j].0),
+                                left_dimensions[i].1 + right_dimensions[j].1,
+                            );
+                            // TODO pruning acording to the book
+                            dimensions.push(new_dimension);
+                        }
+                    }
+                }
+                RefCell::new(dimensions)
+            },
+            left: Some(Box::new(left)),
+            right: Some(Box::new(right)),
         }
     }
 
@@ -228,17 +292,18 @@ impl SlicingTree {
         let elements = &polish_expression.elements;
         let mut stack: VecDeque<SlicingTree> = VecDeque::new();
 
-        for i in 0..elements.len()  {
+        for i in 0..elements.len() {
             match elements[i] {
                 Element::Operand(_) => stack.push_back(SlicingTree::new_leaf(elements[i])),
                 Element::Operator(_) => {
                     let right = stack.pop_back().unwrap();
                     let left = stack.pop_back().unwrap();
                     let value = elements[i];
-                    let new_node = SlicingTree::new(value, left, right);
-                    dbg!(&new_node);
+                    // test
+                    let new_node = SlicingTree::new_internal_node(value, left, right);
+                    //let new_node = SlicingTree::new(value, left, right);
                     stack.push_back(new_node);
-                },
+                }
             }
         }
 
@@ -250,16 +315,100 @@ impl SlicingTree {
         self.build_polish_expression_recursive(&self.left, &mut polish_vec);
         self.build_polish_expression_recursive(&self.right, &mut polish_vec);
         polish_vec.push(Some(self.value));
-        dbg!(&polish_vec);
         PolishExpression::new(polish_vec.iter().filter_map(|x| *x).collect())
     }
 
-    fn build_polish_expression_recursive(&self, root: &Option<Box<SlicingTree>>, polish_vec: &mut Vec<Option<Element>>) {
+    fn build_polish_expression_recursive(
+        &self,
+        root: &Option<Box<SlicingTree>>,
+        polish_vec: &mut Vec<Option<Element>>,
+    ) {
         match root {
             Some(node) => {
                 self.build_polish_expression_recursive(&node.left, polish_vec);
                 self.build_polish_expression_recursive(&node.right, polish_vec);
                 polish_vec.push(Some(node.value));
+            }
+            None => (),
+        }
+    }
+
+    pub fn update_sizes(&self) {
+        self.update_sizes_recursive(&self.left);
+        self.update_sizes_recursive(&self.right);
+        // * = V vertical
+        // + = H horizontal
+        match self.value {
+            Element::Operand(_) => println!("Weird recursion result in update_sizes"),
+            Element::Operator(b) => {
+                //if b == '*' {
+                let mut new_dimensions = Vec::new();
+                let left_dimensions = self.left.as_ref().unwrap().dimensions.borrow_mut(); //.dimensions.borrow();
+                let right_dimensions = &self.right.as_ref().unwrap().dimensions.borrow_mut();
+                for i in 0..left_dimensions.len() {
+                    for j in 0..right_dimensions.len() {
+                        if b == '*' {
+                            let new_dimension = (
+                                left_dimensions[i].0 + right_dimensions[j].0,
+                                left_dimensions[i].1.max(right_dimensions[j].1),
+                            );
+                            // TODO pruning acording to the book
+                            new_dimensions.push(new_dimension);
+                        } else {
+                            let new_dimension = (
+                                left_dimensions[i].0.max(right_dimensions[j].0),
+                                left_dimensions[i].1 + right_dimensions[j].1,
+                            );
+                            // TODO pruning acording to the book
+                            new_dimensions.push(new_dimension);
+                        }
+                    }
+                }
+                self.dimensions.borrow_mut().clear();
+                self.dimensions.borrow_mut().append(&mut new_dimensions);
+            }
+        }
+    }
+
+    fn update_sizes_recursive(&self, root: &Option<Box<SlicingTree>>) {
+        match root {
+            Some(node) => {
+                self.update_sizes_recursive(&node.left);
+                self.update_sizes_recursive(&node.right);
+                match node.value {
+                    Element::Operand(_) => (),
+                    Element::Operator(b) => {
+                        println!("Here I am");
+                        let mut new_dimensions = Vec::new();
+                        let left_dimensions = self.left.as_ref().unwrap().dimensions.borrow_mut();
+                        let right_dimensions = self.right.as_ref().unwrap().dimensions.borrow_mut();
+                        dbg!(&right_dimensions.len());
+                        for i in 0..left_dimensions.len() {
+                            for j in 0..right_dimensions.len() {
+                                if b == '*' {
+                                    //println!("Hello");
+                                    let new_dimension = (
+                                        left_dimensions[i].0 + right_dimensions[j].0,
+                                        left_dimensions[i].1.max(right_dimensions[j].1),
+                                    );
+                                    // TODO pruning acording to the book
+                                    new_dimensions.push(new_dimension);
+                                } else {
+                                    let new_dimension = (
+                                        left_dimensions[i].0.max(right_dimensions[j].0),
+                                        left_dimensions[i].1 + right_dimensions[j].1,
+                                    );
+                                    // TODO pruning acording to the book
+                                    new_dimensions.push(new_dimension);
+                                }
+                            }
+                        }
+                        dbg!(&new_dimensions);
+                        self.dimensions.borrow_mut().clear();
+                        self.dimensions.borrow_mut().append(&mut new_dimensions);
+                        dbg!(&self.dimensions);
+                    }
+                }
             }
             None => (),
         }
@@ -286,16 +435,30 @@ impl SlicingTree {
 }
 
 fn main() {
-
     let _c = [[0.1f32; 5]; 5];
     let modules = vec![
         Module::new(1, 4.0, 6.0, true),
         Module::new(2, 4.0, 4.0, true),
         Module::new(3, 3.0, 4.0, true),
         Module::new(4, 4.0, 4.0, true),
-        Module::new(5, 3.0, 4.0, true)
+        Module::new(5, 3.0, 4.0, true),
     ];
-    let rectangles: [Rectangle; 5];
+    let rectangles: Vec<Rectangle> = modules
+        .iter()
+        .map(|module| Rectangle::new(module))
+        .collect();
+
+    // let mut rectangle_sizes: Vec<Vec<(f32, f32)>> = Vec::new();
+    // for module in modules {
+    //     let mut initial_rect_sizes = Vec::new();
+    //     if module.rotatable && module.width != module.height {
+    //         initial_rect_sizes.push((module.width, module.height));
+    //         initial_rect_sizes.push((module.height, module.width));
+    //     } else {
+    //         initial_rect_sizes.push((module.width, module.height));
+    //     }
+    //     rectangle_sizes.push(initial_rect_sizes);
+    // }
 
     let test_polish_vec = vec![
         Element::Operand(modules[0]),
@@ -326,11 +489,12 @@ fn main() {
 
     // * = V vertical
     // + = H horizontal
-    
-    // let test_tree_polish = PolishExpression::new(test_tree_polish_vec);
-    // println!("{}", test_tree_polish);
-    // let test_tree = SlicingTree::build_from_polish_expression(&test_tree_polish);
+
+    let mut test_tree = SlicingTree::build_from_polish_expression(&test_polish);
     // dbg!(&test_tree);
+    // test_tree.update_sizes();
+    dbg!(&test_tree.dimensions);
     // let test_output = test_tree.build_polish_expression();
-    // println!("{}", test_output);
+    test_tree.inorder_print();
+   // println!("{}", test_output);
 }
