@@ -42,8 +42,8 @@ enum Element {
 impl fmt::Display for Element {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Element::Operand(c) => write!(f, "{}", c),
-            Element::Operator(b) => write!(f, "{}", b),
+            Element::Operand(c) => write!(f, "{} ", c),
+            Element::Operator(b) => write!(f, "{} ", b),
         }
     }
 }
@@ -188,7 +188,7 @@ impl PolishExpression {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 struct SlicingTree {
     value: Element,
     left: Option<Box<SlicingTree>>,
@@ -222,19 +222,20 @@ impl SlicingTree {
         self
     }
 
-    // TODO insert method with inorder traversal
+    // create a tree from a polish expression
     pub fn build_from_polish_expression(polish_expression: &PolishExpression) -> SlicingTree {
         let elements = &polish_expression.elements;
         let mut stack: VecDeque<SlicingTree> = VecDeque::new();
 
-        for i in 0..elements.len() {
+        for i in 0..elements.len()  {
             match elements[i] {
                 Element::Operand(_) => stack.push_back(SlicingTree::new_leaf(elements[i])),
                 Element::Operator(_) => {
                     let right = stack.pop_back().unwrap();
                     let left = stack.pop_back().unwrap();
                     let value = elements[i];
-                    let mut new_node = SlicingTree::new(value, left, right);
+                    let new_node = SlicingTree::new(value, left, right);
+                    dbg!(&new_node);
                     stack.push_back(new_node);
                 },
             }
@@ -243,18 +244,31 @@ impl SlicingTree {
         stack.pop_back().unwrap()
     }
 
-    fn build_from_polish_expression_recursion() -> Vec<Element> {
+    pub fn build_polish_expression(&self) -> PolishExpression {
         let mut polish_vec = Vec::new();
-
-
-
-        polish_vec
+        self.build_polish_expression_recursive(&self.left, &mut polish_vec);
+        self.build_polish_expression_recursive(&self.right, &mut polish_vec);
+        polish_vec.push(Some(self.value));
+        dbg!(&polish_vec);
+        PolishExpression::new(polish_vec.iter().filter_map(|x| *x).collect())
     }
 
+    fn build_polish_expression_recursive(&self, root: &Option<Box<SlicingTree>>, polish_vec: &mut Vec<Option<Element>>) {
+        match root {
+            Some(node) => {
+                self.build_polish_expression_recursive(&node.left, polish_vec);
+                self.build_polish_expression_recursive(&node.right, polish_vec);
+                polish_vec.push(Some(node.value));
+            }
+            None => (),
+        }
+    }
+
+    // for debugging
     pub fn inorder_print(&self) {
         self.inorder_print_recursive(&self.left);
-        print!("{}", self.value);
         self.inorder_print_recursive(&self.right);
+        print!("{}", self.value);
         println!();
     }
 
@@ -262,8 +276,8 @@ impl SlicingTree {
         match root {
             Some(node) => {
                 self.inorder_print_recursive(&node.left);
+                self.inorder_print_recursive(&node.right);
                 print!("{}", node.value);
-                self.inorder_print_recursive(&node.right)
             }
             None => (),
         }
@@ -299,4 +313,44 @@ fn main() {
     println!("{}", test_polish);
     test_polish.m3();
     println!("{}", test_polish);
+
+    // * = V vertical
+    // + = H horizontal
+    let test_tree_polish_vec = vec![
+        Element::Operand(1),
+        Element::Operand(2),
+        Element::Operator('+'),
+        Element::Operand(3),
+        Element::Operand(4),
+        Element::Operator('+'),
+        Element::Operand(5),
+        Element::Operator('+'),
+        Element::Operator('*'),
+        Element::Operand(6),
+        Element::Operand(7),
+        Element::Operator('+'),
+        Element::Operand(8),
+        Element::Operand(9),
+        Element::Operator('+'),
+        Element::Operand(10),
+        Element::Operator('+'),
+        Element::Operator('*'),
+        Element::Operand(11),
+        Element::Operand(12),
+        Element::Operator('+'),
+        Element::Operand(13),
+        Element::Operand(14),
+        Element::Operator('+'),
+        Element::Operand(15),
+        Element::Operator('+'),
+        Element::Operator('*'),
+        Element::Operator('*'),
+        Element::Operator('*'),
+    ];
+    let test_tree_polish = PolishExpression::new(test_tree_polish_vec);
+    println!("{}", test_tree_polish);
+    let test_tree = SlicingTree::build_from_polish_expression(&test_tree_polish);
+    dbg!(&test_tree);
+    let test_output = test_tree.build_polish_expression();
+    println!("{}", test_output);
 }
