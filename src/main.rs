@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, collections::VecDeque};
 
 use rand::{
     seq::SliceRandom,
@@ -32,7 +32,7 @@ impl Module {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum Element {
     Operand(i32),
     Operator(char),     // + -> horizontal (a+b = a under b)
@@ -140,19 +140,6 @@ impl PolishExpression {
         } else {
             true
         }
-        // match (&self.elements[i], &self.elements[i + 1]) {
-        //     (Element::Operand(_), Element::Operator(_)) => {
-        //         let mut d = 1;
-        //         for j in 0..i + 1 {
-        //             match self.elements[j] {
-        //                 Element::Operand(_) => (),
-        //                 Element::Operator(_) => d += 1,
-        //             }
-        //         }
-        //         2 * d < i
-        //     }
-        //     _ => true,
-        // }
     }
 
     fn operand_operators(&self) -> Vec<usize> {
@@ -198,6 +185,88 @@ impl PolishExpression {
         let j = operands.get(random_operand_index + 1).unwrap();
 
         (*i, *j)
+    }
+}
+
+#[derive(PartialEq)]
+struct SlicingTree {
+    value: Element,
+    left: Option<Box<SlicingTree>>,
+    right: Option<Box<SlicingTree>>,
+}
+
+impl SlicingTree {
+    pub fn new(value: Element, left: SlicingTree, right: SlicingTree) -> Self {
+        SlicingTree {
+            value,
+            left: Some(Box::new(left)),
+            right: Some(Box::new(right)),
+        }
+    }
+    pub fn new_leaf(value: Element) -> Self {
+        SlicingTree {
+            value,
+            left: None,
+            right: None,
+        }
+    }
+
+    // manual insertion for testing purposes
+    pub fn left(mut self, node: SlicingTree) -> Self {
+        self.left = Some(Box::new(node));
+        self
+    }
+    // manual insertion for testing purposes
+    pub fn right(mut self, node: SlicingTree) -> Self {
+        self.right = Some(Box::new(node));
+        self
+    }
+
+    // TODO insert method with inorder traversal
+    pub fn build_from_polish_expression(polish_expression: &PolishExpression) -> SlicingTree {
+        let elements = &polish_expression.elements;
+        let mut stack: VecDeque<SlicingTree> = VecDeque::new();
+
+        for i in 0..elements.len() {
+            match elements[i] {
+                Element::Operand(_) => stack.push_back(SlicingTree::new_leaf(elements[i])),
+                Element::Operator(_) => {
+                    let right = stack.pop_back().unwrap();
+                    let left = stack.pop_back().unwrap();
+                    let value = elements[i];
+                    let mut new_node = SlicingTree::new(value, left, right);
+                    stack.push_back(new_node);
+                },
+            }
+        }
+
+        stack.pop_back().unwrap()
+    }
+
+    fn build_from_polish_expression_recursion() -> Vec<Element> {
+        let mut polish_vec = Vec::new();
+
+
+
+        polish_vec
+    }
+
+    pub fn inorder_print(&self) {
+        self.inorder_print_recursive(&self.left);
+        print!("{}", self.value);
+        self.inorder_print_recursive(&self.right);
+        println!();
+    }
+
+    fn inorder_print_recursive(&self, root: &Option<Box<SlicingTree>>) {
+        match root {
+            Some(node) => {
+                self.inorder_print_recursive(&node.left);
+                print!("{}", node.value);
+                self.inorder_print_recursive(&node.right)
+            }
+            None => (),
+        }
     }
 }
 
