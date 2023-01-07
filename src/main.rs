@@ -12,6 +12,7 @@ struct Rectangle {
     height: f32,
 }
 
+#[derive(PartialEq, Debug, Clone, Copy)]
 struct Module {
     name: i32,
     area: f32,
@@ -34,7 +35,7 @@ impl Module {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum Element {
-    Operand(i32),
+    Operand(Module),
     Operator(char),     // + -> horizontal (a+b = a under b)
                         // * -> vertical (a*b) = a on the left of b
 }
@@ -42,7 +43,7 @@ enum Element {
 impl fmt::Display for Element {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Element::Operand(c) => write!(f, "{} ", c),
+            Element::Operand(c) => write!(f, "{} ", c.name),
             Element::Operator(b) => write!(f, "{} ", b),
         }
     }
@@ -285,19 +286,28 @@ impl SlicingTree {
 }
 
 fn main() {
-    let test_polish_vec = vec![
-        Element::Operand(1),
-        Element::Operand(2),
-        Element::Operator('*'),
-        Element::Operand(3),
-        Element::Operator('+'),
-        Element::Operand(4),
-        Element::Operator('*'),
-        Element::Operand(5),
-        Element::Operator('+'),
-    ];
 
     let _c = [[0.1f32; 5]; 5];
+    let modules = vec![
+        Module::new(1, 4.0, 6.0, true),
+        Module::new(2, 4.0, 4.0, true),
+        Module::new(3, 3.0, 4.0, true),
+        Module::new(4, 4.0, 4.0, true),
+        Module::new(5, 3.0, 4.0, true)
+    ];
+    let rectangles: [Rectangle; 5];
+
+    let test_polish_vec = vec![
+        Element::Operand(modules[0]),
+        Element::Operand(modules[1]),
+        Element::Operator('+'),
+        Element::Operand(modules[2]),
+        Element::Operand(modules[3]),
+        Element::Operator('+'),
+        Element::Operand(modules[4]),
+        Element::Operator('+'),
+        Element::Operator('*'),
+    ];
 
     let mut test_polish = PolishExpression::new(test_polish_vec);
     println!("{}", test_polish);
@@ -316,41 +326,11 @@ fn main() {
 
     // * = V vertical
     // + = H horizontal
-    let test_tree_polish_vec = vec![
-        Element::Operand(1),
-        Element::Operand(2),
-        Element::Operator('+'),
-        Element::Operand(3),
-        Element::Operand(4),
-        Element::Operator('+'),
-        Element::Operand(5),
-        Element::Operator('+'),
-        Element::Operator('*'),
-        Element::Operand(6),
-        Element::Operand(7),
-        Element::Operator('+'),
-        Element::Operand(8),
-        Element::Operand(9),
-        Element::Operator('+'),
-        Element::Operand(10),
-        Element::Operator('+'),
-        Element::Operator('*'),
-        Element::Operand(11),
-        Element::Operand(12),
-        Element::Operator('+'),
-        Element::Operand(13),
-        Element::Operand(14),
-        Element::Operator('+'),
-        Element::Operand(15),
-        Element::Operator('+'),
-        Element::Operator('*'),
-        Element::Operator('*'),
-        Element::Operator('*'),
-    ];
-    let test_tree_polish = PolishExpression::new(test_tree_polish_vec);
-    println!("{}", test_tree_polish);
-    let test_tree = SlicingTree::build_from_polish_expression(&test_tree_polish);
-    dbg!(&test_tree);
-    let test_output = test_tree.build_polish_expression();
-    println!("{}", test_output);
+    
+    // let test_tree_polish = PolishExpression::new(test_tree_polish_vec);
+    // println!("{}", test_tree_polish);
+    // let test_tree = SlicingTree::build_from_polish_expression(&test_tree_polish);
+    // dbg!(&test_tree);
+    // let test_output = test_tree.build_polish_expression();
+    // println!("{}", test_output);
 }
