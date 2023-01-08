@@ -39,6 +39,7 @@ impl fmt::Display for Element {
     }
 }
 
+#[derive(Clone)]
 struct PolishExpression {
     elements: Vec<Element>,
 }
@@ -329,45 +330,126 @@ impl SlicingTree {
 
 fn main() {
     let modules = vec![
-        Module::new(1, 4.0, 6.1, true),
-        Module::new(2, 4.0, 4.2, true),
-        Module::new(3, 3.0, 4.3, true),
-        Module::new(4, 4.0, 4.4, true),
-        Module::new(5, 3.0, 4.5, true),
+        Module::new(1, 4.0, 6.0, true),
+        Module::new(2, 4.0, 4.0, true),
+        Module::new(3, 3.0, 4.0, true),
+        Module::new(4, 4.0, 4.0, true),
+        Module::new(5, 3.0, 4.0, true),
     ];
 
-    let test_polish_vec = vec![
-        Element::Operand(modules[0]),
-        Element::Operand(modules[1]),
-        Element::Operator('+'),
-        Element::Operand(modules[2]),
-        Element::Operand(modules[3]),
-        Element::Operator('+'),
-        Element::Operand(modules[4]),
-        Element::Operator('+'),
-        Element::Operator('*'),
-    ];
+    // let test_polish_vec = vec![
+    //     Element::Operand(modules[0]),
+    //     Element::Operand(modules[1]),
+    //     Element::Operator('+'),
+    //     Element::Operand(modules[2]),
+    //     Element::Operand(modules[3]),
+    //     Element::Operator('+'),
+    //     Element::Operand(modules[4]),
+    //     Element::Operator('+'),
+    //     Element::Operator('*'),
+    // ];
 
-    let mut test_polish = PolishExpression::new(test_polish_vec);
+    let mut starter_expression_vec = Vec::new();
+    for (i, module) in modules.iter().enumerate() {
+        if i == 0 || i == 1 {
+            starter_expression_vec.push(Element::Operand(*module));
+        } else if i == 2 {
+            starter_expression_vec.push(Element::Operator('*'));
+            starter_expression_vec.push(Element::Operand(*module));
+            starter_expression_vec.push(Element::Operator('*'));
+        } else {
+            starter_expression_vec.push(Element::Operand(*module));
+            starter_expression_vec.push(Element::Operator('*'));
+        }
+    }
+    let starter_expression = PolishExpression::new(starter_expression_vec);
 
+
+    let alpha = 0.5; // the importance of the wirelength
+    let (average_area, average_hpwl) = get_averages(&mut starter_expression.clone(), modules.len() * 2);
+    let initial_temp = get_initial_temp(&mut starter_expression.clone(), alpha, average_area, average_hpwl);
+    
+
+    let r = 0.85; // temperature schedule
+    let total_moves = 100; // k
+    let mut best_expression = starter_expression.clone();
+    let mut best_cost = SlicingTree::build_from_polish_expression(&best_expression).get_cost(alpha, average_area, average_hpwl);
+    let mut prev_expression = starter_expression.clone();
+    
+    let mut rejected_moves = 0;
+    let mut temp = initial_temp;
+    while (rejected_moves as f32 / total_moves as f32) <= 0.95 && temp >= f32::EPSILON {
+        for _ in 0..total_moves {
+            let prev_cost = SlicingTree::build_from_polish_expression(&prev_expression).get_cost(alpha, average_area, average_hpwl);
+            let mut temp_expression = prev_expression.clone();
+            match rand::thread_rng().gen_range(1..4) {
+                1 => temp_expression.m1(),
+                2 => temp_expression.m2(),
+                _ => temp_expression.m3(),
+            }
+            let tree = SlicingTree::build_from_polish_expression(&temp_expression);
+            let cost = tree.get_cost(alpha, average_area, average_hpwl);
+            let cost_dif = cost - prev_cost;
+
+            if (cost_dif <= 0.0) || (rand::thread_rng().gen_range(0.0..=1.0) < (-cost_dif/temp).exp()) {
+                prev_expression = temp_expression;
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_expression = prev_expression.clone();
+                }
+            } else {
+                rejected_moves += 1;
+            }
+        }
+        temp = temp * r;
+    }
+    println!("{}", best_expression);
+    println!("{}", best_cost);
+    let best_tree = SlicingTree::build_from_polish_expression(&best_expression);
+    let best_area = best_tree.get_area_dims();
+    dbg!(&best_area);
+    
+}
+
+fn get_initial_temp(pe: &mut PolishExpression, alpha: f32, average_area: f32, average_hpwl: f32) -> f32 {
+    const P: f32 = 0.99;
+    let mut previous_cost = 0.0;
+    let mut uphill_moves = 0;
+    let mut cost_difs = 0.0;
+    for _ in 0..100 {
+        match rand::thread_rng().gen_range(1..4) {
+            1 => pe.m1(),
+            2 => pe.m2(),
+            _ => pe.m3(),
+        }
+        let tree = SlicingTree::build_from_polish_expression(&*pe);
+        let cost = tree.get_cost(alpha, average_area, average_hpwl);
+        let dif = cost - previous_cost;
+        if dif > 0.0 {
+            previous_cost = cost;
+            cost_difs += dif;
+            uphill_moves += 1;
+        }
+    }
+    let average_cost = cost_difs / uphill_moves as f32;
+    let initial_temp = -average_cost/P.ln();
+    initial_temp
+}
+
+fn get_averages(pe: &mut PolishExpression, m: usize) -> (f32, f32) {
     let mut random_areas = Vec::new();
     let mut random_hpwls = Vec::new();
-    for _ in 0..modules.len() {
+    for _ in 0..m {
         match rand::thread_rng().gen_range(1..4) {
-            1 => test_polish.m1(),
-            2 => test_polish.m2(),
-            _ => test_polish.m3(),
+            1 => pe.m1(),
+            2 => pe.m2(),
+            _ => pe.m3(),
         }
-        let tree = SlicingTree::build_from_polish_expression(&test_polish);
+        let tree = SlicingTree::build_from_polish_expression(&*pe);
         random_areas.push(tree.get_area());
         random_hpwls.push(tree.get_hpwl());
     }
     let average_area: f32 = random_areas.iter().sum::<f32>() / random_areas.len() as f32;
     let average_hpwl = random_hpwls.iter().sum::<f32>() / random_hpwls.len() as f32;
-    let tree = SlicingTree::build_from_polish_expression(&test_polish);
-    dbg!(&tree.get_cost(0.5, average_area, average_hpwl));
-    println!("{}", average_area);
-    println!("{}", average_hpwl);
-    println!("{}", test_polish);
-    
+    (average_area, average_hpwl)
 }
