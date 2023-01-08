@@ -188,14 +188,6 @@ struct SlicingTree {
 }
 
 impl SlicingTree {
-    pub fn new(value: Element, left: SlicingTree, right: SlicingTree) -> Self {
-        SlicingTree {
-            value,
-            dimensions: RefCell::new(Vec::new()),
-            left: Some(Box::new(left)),
-            right: Some(Box::new(right)),
-        }
-    }
     pub fn new_leaf(value: Element) -> Self {
         SlicingTree {
             value,
@@ -255,17 +247,6 @@ impl SlicingTree {
         }
     }
 
-    // manual insertion for testing purposes
-    pub fn left(mut self, node: SlicingTree) -> Self {
-        self.left = Some(Box::new(node));
-        self
-    }
-    // manual insertion for testing purposes
-    pub fn right(mut self, node: SlicingTree) -> Self {
-        self.right = Some(Box::new(node));
-        self
-    }
-
     // create a tree from a polish expression
     pub fn build_from_polish_expression(polish_expression: &PolishExpression) -> SlicingTree {
         let elements = &polish_expression.elements;
@@ -287,29 +268,6 @@ impl SlicingTree {
         }
 
         stack.pop_back().unwrap()
-    }
-
-    pub fn build_polish_expression(&self) -> PolishExpression {
-        let mut polish_vec = Vec::new();
-        self.build_polish_expression_recursive(&self.left, &mut polish_vec);
-        self.build_polish_expression_recursive(&self.right, &mut polish_vec);
-        polish_vec.push(Some(self.value));
-        PolishExpression::new(polish_vec.iter().filter_map(|x| *x).collect())
-    }
-
-    fn build_polish_expression_recursive(
-        &self,
-        root: &Option<Box<SlicingTree>>,
-        polish_vec: &mut Vec<Option<Element>>,
-    ) {
-        match root {
-            Some(node) => {
-                self.build_polish_expression_recursive(&node.left, polish_vec);
-                self.build_polish_expression_recursive(&node.right, polish_vec);
-                polish_vec.push(Some(node.value));
-            }
-            None => (),
-        }
     }
 
     pub fn get_pin_positions(&self, area: (f32, f32)) -> (f32, f32, f32, f32) {
@@ -343,10 +301,6 @@ impl SlicingTree {
         )
     }
 
-    fn get_hpwl2((max_x, min_x, max_y, min_y): (f32, f32, f32, f32)) -> f32 {
-        (max_x - min_x) + (max_y - min_y)
-    }
-
     fn get_hpwl(&self) -> f32 {
         let area_dims = self.get_area_dims();
         let (max_x, min_x, max_y, min_y) = self.get_pin_positions(area_dims);
@@ -366,32 +320,10 @@ impl SlicingTree {
     }
 
     pub fn get_cost(&self, alpha: f32, average_area: f32, average_hpwl: f32) -> f32 {
-        let area_dims = self.get_area_dims();
         let area = self.get_area();
         let hpwl = self.get_hpwl();
 
         alpha*(area/average_area) + (1.0-alpha)*(hpwl/average_hpwl)
-    }
-
-    // for debugging
-    pub fn inorder_print(&self) {
-        self.inorder_print_recursive(&self.left);
-        print!("{}", self.value);
-        self.inorder_print_recursive(&self.right);
-        //print!("{}", self.value);
-        println!();
-    }
-
-    fn inorder_print_recursive(&self, root: &Option<Box<SlicingTree>>) {
-        match root {
-            Some(node) => {
-                self.inorder_print_recursive(&node.left);
-                print!("{}", node.value);
-                self.inorder_print_recursive(&node.right);
-                // print!("{}", node.value);
-            }
-            None => (),
-        }
     }
 }
 
@@ -420,7 +352,7 @@ fn main() {
 
     let mut random_areas = Vec::new();
     let mut random_hpwls = Vec::new();
-    for i in 0..modules.len() {
+    for _ in 0..modules.len() {
         match rand::thread_rng().gen_range(1..4) {
             1 => test_polish.m1(),
             2 => test_polish.m2(),
