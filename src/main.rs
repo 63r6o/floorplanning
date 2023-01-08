@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, fmt};
+use std::{cell::RefCell, collections::VecDeque, env, fmt, fs};
 
 use rand::{seq::SliceRandom, Rng};
 
@@ -26,8 +26,7 @@ impl Module {
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum Element {
     Operand(Module),
-    Operator(char), // + -> horizontal (a+b = a under b)
-                    // * -> vertical (a*b) = a on the left of b
+    Operator(char), //+ -> horizontal, * -> vertical
 }
 
 impl fmt::Display for Element {
@@ -227,16 +226,12 @@ impl SlicingTree {
                                 left_dimensions[i].0 + right_dimensions[j].0,
                                 left_dimensions[i].1.max(right_dimensions[j].1),
                             );
-                            // TODO pruning acording to the book
-                            //dimensions.retain(|&dim| (dim.0 >= new_dimension.0) && (dim.1 >= new_dimension.1));
                             dimensions.push(new_dimension);
                         } else if b == '+' {
                             let new_dimension = (
                                 left_dimensions[i].0.max(right_dimensions[j].0),
                                 left_dimensions[i].1 + right_dimensions[j].1,
                             );
-                            // TODO pruning acording to the book
-                            //dimensions.retain(|&dim| (dim.0 >= new_dimension.0) && (dim.1 >= new_dimension.1));
                             dimensions.push(new_dimension);
                         }
                     }
@@ -249,25 +244,22 @@ impl SlicingTree {
     }
 
     // create a tree from a polish expression
-    pub fn build_from_polish_expression(polish_expression: &PolishExpression) -> SlicingTree {
+    pub fn build(polish_expression: &PolishExpression) -> SlicingTree {
         let elements = &polish_expression.elements;
         let mut stack: VecDeque<SlicingTree> = VecDeque::new();
 
-        for i in 0..elements.len() {
-            match elements[i] {
-                Element::Operand(_) => stack.push_back(SlicingTree::new_leaf(elements[i])),
+        for element in elements {
+            match element {
+                Element::Operand(_) => stack.push_back(SlicingTree::new_leaf(*element)),
                 Element::Operator(_) => {
                     let right = stack.pop_back().unwrap();
                     let left = stack.pop_back().unwrap();
-                    let value = elements[i];
-                    // test
+                    let value = *element;
                     let new_node = SlicingTree::new_internal_node(value, left, right);
-                    //let new_node = SlicingTree::new(value, left, right);
                     stack.push_back(new_node);
                 }
             }
         }
-
         stack.pop_back().unwrap()
     }
 
@@ -324,30 +316,24 @@ impl SlicingTree {
         let area = self.get_area();
         let hpwl = self.get_hpwl();
 
-        alpha*(area/average_area) + (1.0-alpha)*(hpwl/average_hpwl)
+        alpha * (area / average_area) + (1.0 - alpha) * (hpwl / average_hpwl)
     }
 }
 
 fn main() {
-    let modules = vec![
-        Module::new(1, 4.0, 6.0, true),
-        Module::new(2, 4.0, 4.0, true),
-        Module::new(3, 3.0, 4.0, true),
-        Module::new(4, 4.0, 4.0, true),
-        Module::new(5, 3.0, 4.0, true),
-    ];
+    let args: Vec<String> = env::args().collect();
+    let path = &args[1];
+    let module_inputs = fs::read_to_string(path).expect("Couldn't open file");
 
-    // let test_polish_vec = vec![
-    //     Element::Operand(modules[0]),
-    //     Element::Operand(modules[1]),
-    //     Element::Operator('+'),
-    //     Element::Operand(modules[2]),
-    //     Element::Operand(modules[3]),
-    //     Element::Operator('+'),
-    //     Element::Operand(modules[4]),
-    //     Element::Operator('+'),
-    //     Element::Operator('*'),
-    // ];
+    let mut modules = Vec::new();
+    for line in module_inputs.lines() {
+        let input: Vec<&str> = line.split(", ").collect();
+        let name = input[0].parse::<i32>().unwrap();
+        let width = input[1].parse::<f32>().unwrap();
+        let height = input[2].parse::<f32>().unwrap();
+        let rotatable = if input[3] == "true" { true } else { false };
+        modules.push(Module::new(name, width, height, rotatable));
+    }
 
     let mut starter_expression_vec = Vec::new();
     for (i, module) in modules.iter().enumerate() {
@@ -363,55 +349,88 @@ fn main() {
         }
     }
     let starter_expression = PolishExpression::new(starter_expression_vec);
+    let starter_tree = SlicingTree::build(&starter_expression); // for the stats
 
+    // get the average area and wirelength for the cost function
+    let (average_area, average_hpwl) =
+        get_averages(&mut starter_expression.clone(), modules.len() * 2);
 
+    // get the initial temperature
     let alpha = 0.5; // the importance of the wirelength
-    let (average_area, average_hpwl) = get_averages(&mut starter_expression.clone(), modules.len() * 2);
-    let initial_temp = get_initial_temp(&mut starter_expression.clone(), alpha, average_area, average_hpwl);
-    
+    let initial_temp = get_initial_temp(
+        &mut starter_expression.clone(),
+        alpha,
+        average_area,
+        average_hpwl,
+    );
 
+    // scheduled annealing
     let r = 0.85; // temperature schedule
-    let total_moves = 100; // k
+    let total_moves = modules.len() * modules.len(); // k
     let mut best_expression = starter_expression.clone();
-    let mut best_cost = SlicingTree::build_from_polish_expression(&best_expression).get_cost(alpha, average_area, average_hpwl);
+    let mut best_tree = SlicingTree::build(&best_expression);
+    let mut best_cost = best_tree.get_cost(alpha, average_area, average_hpwl);
     let mut prev_expression = starter_expression.clone();
-    
+    let mut prev_tree = SlicingTree::build(&prev_expression);
+
     let mut rejected_moves = 0;
     let mut temp = initial_temp;
+
     while (rejected_moves as f32 / total_moves as f32) <= 0.95 && temp >= f32::EPSILON {
         for _ in 0..total_moves {
-            let prev_cost = SlicingTree::build_from_polish_expression(&prev_expression).get_cost(alpha, average_area, average_hpwl);
+            let prev_cost = prev_tree.get_cost(alpha, average_area, average_hpwl);
             let mut temp_expression = prev_expression.clone();
             match rand::thread_rng().gen_range(1..4) {
                 1 => temp_expression.m1(),
                 2 => temp_expression.m2(),
                 _ => temp_expression.m3(),
             }
-            let tree = SlicingTree::build_from_polish_expression(&temp_expression);
+            let tree = SlicingTree::build(&temp_expression);
             let cost = tree.get_cost(alpha, average_area, average_hpwl);
             let cost_dif = cost - prev_cost;
 
-            if (cost_dif <= 0.0) || (rand::thread_rng().gen_range(0.0..=1.0) < (-cost_dif/temp).exp()) {
+            let random = rand::thread_rng().gen_range(0.0..=1.0);
+
+            if (cost_dif <= 0.0) || (random < -cost_dif / temp.powf(f32::EPSILON)) {
                 prev_expression = temp_expression;
+                prev_tree = SlicingTree::build(&prev_expression);
                 if cost < best_cost {
                     best_cost = cost;
                     best_expression = prev_expression.clone();
+                    best_tree = SlicingTree::build(&best_expression);
                 }
             } else {
                 rejected_moves += 1;
             }
         }
-        temp = temp * r;
+        temp *= r;
     }
-    println!("{}", best_expression);
-    println!("{}", best_cost);
-    let best_tree = SlicingTree::build_from_polish_expression(&best_expression);
     let best_area = best_tree.get_area_dims();
-    dbg!(&best_area);
-    
+    let starter_area = starter_tree.get_area_dims();
+
+    println!("Starting expression: {}", starter_expression);
+    println!(
+        "Starting Width: {}\nStarting Height: {}",
+        starter_area.0, starter_area.1
+    );
+    println!(
+        "Starting floorplan area: {}",
+        starter_area.0 * starter_area.1
+    );
+    println!("Starting wirelength: {}", starter_tree.get_hpwl());
+
+    println!("{}", best_expression);
+    println!("Width: {}\nHeight: {}", best_area.0, best_area.1);
+    println!("Floorplan area: {}", best_area.0 * best_area.1);
+    println!("Wirelength: {}", best_tree.get_hpwl());
 }
 
-fn get_initial_temp(pe: &mut PolishExpression, alpha: f32, average_area: f32, average_hpwl: f32) -> f32 {
+fn get_initial_temp(
+    pe: &mut PolishExpression,
+    alpha: f32,
+    average_area: f32,
+    average_hpwl: f32,
+) -> f32 {
     const P: f32 = 0.99;
     let mut previous_cost = 0.0;
     let mut uphill_moves = 0;
@@ -422,7 +441,7 @@ fn get_initial_temp(pe: &mut PolishExpression, alpha: f32, average_area: f32, av
             2 => pe.m2(),
             _ => pe.m3(),
         }
-        let tree = SlicingTree::build_from_polish_expression(&*pe);
+        let tree = SlicingTree::build(&*pe);
         let cost = tree.get_cost(alpha, average_area, average_hpwl);
         let dif = cost - previous_cost;
         if dif > 0.0 {
@@ -432,8 +451,7 @@ fn get_initial_temp(pe: &mut PolishExpression, alpha: f32, average_area: f32, av
         }
     }
     let average_cost = cost_difs / uphill_moves as f32;
-    let initial_temp = -average_cost/P.ln();
-    initial_temp
+    -average_cost / P.ln()
 }
 
 fn get_averages(pe: &mut PolishExpression, m: usize) -> (f32, f32) {
@@ -445,7 +463,7 @@ fn get_averages(pe: &mut PolishExpression, m: usize) -> (f32, f32) {
             2 => pe.m2(),
             _ => pe.m3(),
         }
-        let tree = SlicingTree::build_from_polish_expression(&*pe);
+        let tree = SlicingTree::build(&*pe);
         random_areas.push(tree.get_area());
         random_hpwls.push(tree.get_hpwl());
     }
