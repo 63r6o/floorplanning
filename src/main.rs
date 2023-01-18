@@ -24,16 +24,25 @@ impl Module {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
+enum Cut {
+    Vertical,   // *
+    Horizontal, // +
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum Element {
     Operand(Module),
-    Operator(char), //+ -> horizontal, * -> vertical
+    Operator(Cut),
 }
 
 impl fmt::Display for Element {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Element::Operand(c) => write!(f, "{} ", c.name),
-            Element::Operator(b) => write!(f, "{} ", b),
+            Element::Operand(module) => write!(f, "{} ", module.name),
+            Element::Operator(cut) => match cut {
+                Cut::Vertical => write!(f, "* "),
+                Cut::Horizontal => write!(f, "+ "),
+            },
         }
     }
 }
@@ -66,37 +75,29 @@ impl PolishExpression {
     pub fn m2(&mut self) {
         // get a random chain's starting index
         let mut i = *self.chain_starts().choose(&mut rand::thread_rng()).unwrap();
+
         // loop trough the chain and complement them
-        loop {
-            if i > self.elements.len() - 1 {
+        while let Element::Operator(cut) = self.elements[i] {
+            match cut {
+                Cut::Vertical => self.elements[i] = Element::Operator(Cut::Horizontal),
+                Cut::Horizontal => self.elements[i] = Element::Operator(Cut::Vertical),
+            }
+            if i == self.elements.len() - 1 {
                 break;
             }
-            if let Element::Operator(b) = self.elements[i] {
-                if b == '*' {
-                    self.elements[i] = Element::Operator('+')
-                } else {
-                    self.elements[i] = Element::Operator('*')
-                }
-                i += 1;
-            } else {
-                break;
-            }
+            i += 1;
         }
     }
 
     pub fn m3(&mut self) {
         // get the adjacent operand-operators
         let mut operand_operators = self.operand_operators();
+
         // swap them while keeping the polish expression normalised
-        loop {
-            // get a random operand-operator index from the list, and remove it (so we can't choose it twice)
-            if operand_operators.is_empty() {
-                break;
-            }
+        while !operand_operators.is_empty() {
             let random = rand::thread_rng().gen_range(0..operand_operators.len());
             let i = operand_operators.remove(random);
 
-            // swap them
             if self.is_skewed(i) && self.is_balloting(i) {
                 self.elements.swap(i, i + 1);
                 break;
@@ -105,28 +106,22 @@ impl PolishExpression {
     }
 
     fn is_skewed(&self, i: usize) -> bool {
-        if !(self.elements[i + 1] == self.elements[i - 1]) {
-            if i + 2 >= self.elements.len() {
-                true
-            } else {
-                !(self.elements[i] == self.elements[i + 2])
-            }
-        } else {
-            false
+        match self.elements[i] {
+            Element::Operand(_) => self.elements[i + 1] != self.elements[i - 1],
+            Element::Operator(_) => self.elements[i] != self.elements[i + 2],
         }
     }
 
     fn is_balloting(&self, i: usize) -> bool {
-        if let (Element::Operand(_), Element::Operator(_)) =
-            (&self.elements[i], &self.elements[i + 1])
-        {
-            let mut d = 0;
-            for j in 0..=i + 1 {
-                match self.elements[j] {
-                    Element::Operand(_) => (),
-                    Element::Operator(_) => d += 1,
-                }
-            }
+        if matches!(
+            (&self.elements[i], &self.elements[i + 1]),
+            (Element::Operand(_), Element::Operator(_))
+        ) {
+            let d = self.elements[..=i + 1]
+                .iter()
+                .filter(|element| matches!(element, Element::Operator(_)))
+                .count();
+
             2 * d <= i
         } else {
             true
@@ -170,12 +165,10 @@ impl PolishExpression {
     fn get_random_operands(&self) -> (usize, usize) {
         // get all the operands' indexes
         let operands: Vec<usize> = self.operands();
+
         // get a random adjacent pair
         let random_operand_index = rand::thread_rng().gen_range(0..operands.len() - 1);
-        let i = operands.get(random_operand_index).unwrap();
-        let j = operands.get(random_operand_index + 1).unwrap();
-
-        (*i, *j)
+        (operands[random_operand_index], operands[random_operand_index + 1])
     }
 }
 
@@ -193,12 +186,12 @@ impl SlicingTree {
             value,
             dimensions: {
                 let mut dimensions = Vec::new();
-                if let Element::Operand(c) = value {
-                    if c.rotatable && c.width != c.height {
-                        dimensions.push((c.width, c.height));
-                        dimensions.push((c.height, c.width));
+                if let Element::Operand(module) = value {
+                    if module.rotatable && module.width != module.height {
+                        dimensions.push((module.width, module.height));
+                        dimensions.push((module.height, module.width));
                     } else {
-                        dimensions.push((c.width, c.height));
+                        dimensions.push((module.width, module.height));
                     }
                 }
                 RefCell::new(dimensions)
@@ -215,19 +208,19 @@ impl SlicingTree {
                 let left_dimensions = left.dimensions.borrow();
                 let right_dimensions = right.dimensions.borrow();
                 let mut dimensions: Vec<(f32, f32)> = Vec::new();
-                let b = match value {
+                let cut = match value {
                     Element::Operand(_) => unreachable!(),
-                    Element::Operator(b) => b,
+                    Element::Operator(cut) => cut,
                 };
                 for i in 0..left_dimensions.len() {
                     for j in 0..right_dimensions.len() {
-                        if b == '*' {
+                        if cut == Cut::Vertical {
                             let new_dimension = (
                                 left_dimensions[i].0 + right_dimensions[j].0,
                                 left_dimensions[i].1.max(right_dimensions[j].1),
                             );
                             dimensions.push(new_dimension);
-                        } else if b == '+' {
+                        } else if cut == Cut::Horizontal {
                             let new_dimension = (
                                 left_dimensions[i].0.max(right_dimensions[j].0),
                                 left_dimensions[i].1 + right_dimensions[j].1,
@@ -331,7 +324,7 @@ fn main() {
         let name = input[0].parse::<i32>().unwrap();
         let width = input[1].parse::<f32>().unwrap();
         let height = input[2].parse::<f32>().unwrap();
-        let rotatable = if input[3] == "true" { true } else { false };
+        let rotatable = input[3] == "true";
         modules.push(Module::new(name, width, height, rotatable));
     }
 
@@ -340,12 +333,12 @@ fn main() {
         if i == 0 || i == 1 {
             starter_expression_vec.push(Element::Operand(*module));
         } else if i == 2 {
-            starter_expression_vec.push(Element::Operator('*'));
+            starter_expression_vec.push(Element::Operator(Cut::Vertical));
             starter_expression_vec.push(Element::Operand(*module));
-            starter_expression_vec.push(Element::Operator('*'));
+            starter_expression_vec.push(Element::Operator(Cut::Vertical));
         } else {
             starter_expression_vec.push(Element::Operand(*module));
-            starter_expression_vec.push(Element::Operator('*'));
+            starter_expression_vec.push(Element::Operator(Cut::Vertical));
         }
     }
     let starter_expression = PolishExpression::new(starter_expression_vec);
