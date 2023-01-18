@@ -5,7 +5,7 @@ My final project for the Algorithms for VLSI class.
 ```bash
 cargo run path/to/input/file
 ```
-### Input
+## Input
 csv file, where each row is representing a module:
 ```
 name of the module, width, height, is it rotatable?
@@ -16,7 +16,7 @@ pattern_generator.py can generate a random input:
 python3 pattern_generator.py number_of_modules > output.csv
 ```
 
-### Output
+## Output
 ```
 Starting expression
 Starting Width
