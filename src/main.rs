@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, env, fmt, fs};
+use std::{borrow::Borrow, cell::RefCell, collections::VecDeque, env, fmt, fs};
 
 use rand::{seq::SliceRandom, Rng};
 
@@ -64,19 +64,17 @@ impl PolishExpression {
         PolishExpression { elements }
     }
 
+    // get the index of two adjacent operands
+    // swap them
     pub fn m1(&mut self) {
-        // get the index of two adjacent operands
         let (i, j) = self.get_random_operands();
-
-        // swap them
         self.elements.swap(i, j)
     }
 
+    // get a random chain's starting index
+    // loop trough the chain and complement the elements
     pub fn m2(&mut self) {
-        // get a random chain's starting index
         let mut i = *self.chain_starts().choose(&mut rand::thread_rng()).unwrap();
-
-        // loop trough the chain and complement them
         while let Element::Operator(cut) = self.elements[i] {
             match cut {
                 Cut::Vertical => self.elements[i] = Element::Operator(Cut::Horizontal),
@@ -89,11 +87,10 @@ impl PolishExpression {
         }
     }
 
+    // get the adjacent operand-operators
+    // swap them while keeping the polish expression normalised
     pub fn m3(&mut self) {
-        // get the adjacent operand-operators
         let mut operand_operators = self.operand_operators();
-
-        // swap them while keeping the polish expression normalised
         while !operand_operators.is_empty() {
             let random = rand::thread_rng().gen_range(0..operand_operators.len());
             let i = operand_operators.remove(random);
@@ -162,13 +159,15 @@ impl PolishExpression {
             .collect()
     }
 
+    // get all the operands' indexes
+    // get a random adjacent pair from them
     fn get_random_operands(&self) -> (usize, usize) {
-        // get all the operands' indexes
         let operands: Vec<usize> = self.operands();
-
-        // get a random adjacent pair
         let random_operand_index = rand::thread_rng().gen_range(0..operands.len() - 1);
-        (operands[random_operand_index], operands[random_operand_index + 1])
+        (
+            operands[random_operand_index],
+            operands[random_operand_index + 1],
+        )
     }
 }
 
@@ -207,33 +206,44 @@ impl SlicingTree {
             dimensions: {
                 let left_dimensions = left.dimensions.borrow();
                 let right_dimensions = right.dimensions.borrow();
-                let mut dimensions: Vec<(f32, f32)> = Vec::new();
                 let cut = match value {
                     Element::Operand(_) => unreachable!(),
                     Element::Operator(cut) => cut,
                 };
-                for i in 0..left_dimensions.len() {
-                    for j in 0..right_dimensions.len() {
-                        if cut == Cut::Vertical {
-                            let new_dimension = (
-                                left_dimensions[i].0 + right_dimensions[j].0,
-                                left_dimensions[i].1.max(right_dimensions[j].1),
-                            );
-                            dimensions.push(new_dimension);
-                        } else if cut == Cut::Horizontal {
-                            let new_dimension = (
-                                left_dimensions[i].0.max(right_dimensions[j].0),
-                                left_dimensions[i].1 + right_dimensions[j].1,
-                            );
-                            dimensions.push(new_dimension);
-                        }
-                    }
-                }
+                let dimensions = SlicingTree::get_dimensions(
+                    left_dimensions.borrow(),
+                    right_dimensions.borrow(),
+                    cut,
+                );
                 RefCell::new(dimensions)
             },
             left: Some(Box::new(left)),
             right: Some(Box::new(right)),
         }
+    }
+
+    fn get_dimensions(
+        left_dimensions: &Vec<(f32, f32)>,
+        right_dimensions: &Vec<(f32, f32)>,
+        cut: Cut,
+    ) -> Vec<(f32, f32)> {
+        let mut dimensions: Vec<(f32, f32)> = Vec::new();
+        for i in 0..left_dimensions.len() {
+            for j in 0..right_dimensions.len() {
+                let new_dimension = match cut {
+                    Cut::Vertical => (
+                        left_dimensions[i].0 + right_dimensions[j].0,
+                        left_dimensions[i].1.max(right_dimensions[j].1),
+                    ),
+                    Cut::Horizontal => (
+                        left_dimensions[i].0.max(right_dimensions[j].0),
+                        left_dimensions[i].1 + right_dimensions[j].1,
+                    ),
+                };
+                dimensions.push(new_dimension);
+            }
+        }
+        dimensions
     }
 
     // create a tree from a polish expression
@@ -260,9 +270,8 @@ impl SlicingTree {
         let mut left = &self.left;
         let mut left_most_center = (0f32, 0f32);
         while left.is_some() {
-            match left.as_ref().unwrap().value {
-                Element::Operand(c) => left_most_center = (c.width / 2.0, c.height / 2.0),
-                Element::Operator(_) => (),
+            if let Element::Operand(module) = left.as_ref().unwrap().value {
+                left_most_center = (module.width / 2.0, module.height / 2.0)
             }
             left = &left.as_ref().unwrap().left
         }
@@ -270,11 +279,11 @@ impl SlicingTree {
         let mut right = &self.right;
         let mut right_most_center = (0f32, 0f32);
         while right.is_some() {
-            match right.as_ref().unwrap().value {
-                Element::Operand(c) => {
-                    right_most_center = (area.0 - (c.width / 2.0), area.1 - (c.height / 2.0));
-                }
-                Element::Operator(_) => (),
+            if let Element::Operand(module) = right.as_ref().unwrap().value {
+                right_most_center = (
+                    area.0 - (module.width / 2.0),
+                    area.1 - (module.height / 2.0),
+                )
             }
             right = &right.as_ref().unwrap().right
         }
@@ -346,10 +355,10 @@ fn main() {
 
     // get the average area and wirelength for the cost function
     let (average_area, average_hpwl) =
-        get_averages(&mut starter_expression.clone(), modules.len() * 2);
+        get_averages(&mut starter_expression.clone(), modules.len().pow(2));
 
     // get the initial temperature
-    let alpha = 0.5; // the importance of the wirelength
+    let alpha = 0.7; // the importance of the area 
     let initial_temp = get_initial_temp(
         &mut starter_expression.clone(),
         alpha,
@@ -357,9 +366,9 @@ fn main() {
         average_hpwl,
     );
 
-    // scheduled annealing
+    // simulated annealing
     let r = 0.85; // temperature schedule
-    let total_moves = modules.len() * modules.len(); // k
+    let total_moves = modules.len() * 100; // k
     let mut best_expression = starter_expression.clone();
     let mut best_tree = SlicingTree::build(&best_expression);
     let mut best_cost = best_tree.get_cost(alpha, average_area, average_hpwl);
@@ -401,6 +410,7 @@ fn main() {
     let best_area = best_tree.get_area_dims();
     let starter_area = starter_tree.get_area_dims();
 
+    // display results
     println!("Starting expression: {}", starter_expression);
     println!(
         "Starting Width: {}\nStarting Height: {}",
