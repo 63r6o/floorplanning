@@ -8,6 +8,10 @@ A possible strategy for the implementation of the algorithm is described in [^1]
 
 _I have also used the book Electronic Design Automation [^2] as a reference_
 
+<p align="center">
+  <img alt="Illustration of a floorplan" src="preview.png">
+</p>
+
 ## Usage
 ```bash
 cargo run path/to/input/file
